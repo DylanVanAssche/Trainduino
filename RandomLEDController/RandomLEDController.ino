@@ -8,7 +8,7 @@
    *                                        *
    *-----------> LIGHT DECODER <------------*
    *                                        *
-   *           V 1.0.0 PRERELEASE           *
+   *            V 0.9 PRERELEASE            *
    ******************************************
 
    (c) Dylan Van Assche, producer of the Trainduino serie.
