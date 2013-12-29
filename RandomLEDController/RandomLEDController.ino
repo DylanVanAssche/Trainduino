@@ -28,7 +28,6 @@ int Hours = 0; // Saves the hours that are passed. 1 hour = 1 minute.
 
 void setup()
 {
-  Serial.begin(9600);
   SoftPWMBegin();
   for (int i = 2; i < 18; i++) // Set pinMode for output. Pin 2 -> pin 18. Pin 19 is used for the RandomSeed function.
   {
@@ -45,10 +44,12 @@ void loop()
   {
     DayON.check();
     DayOFF.check();
+    SoftPWMSetPercent(17, 0);  // Deactivate the streetlights.
   }
   else
   {
     Night.check();
+    SoftPWMSetPercent(17, 100); // Activate the streetlights.
   }
 }
 
@@ -70,7 +71,6 @@ void NightFunction() // Turn all the outputs OFF! It's night, most of the people
 void TimerDayNightFunction() // Time tracking function.
 {
   Hours++;
-  Serial.print(Hours);
   if (Hours >= 12)
   {
     Status = !Status;
