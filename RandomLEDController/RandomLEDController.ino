@@ -10,6 +10,7 @@
    *                                        *
    *            V 0.9 PRERELEASE            *
    ******************************************
+   THIS IS A PRERELEASE! I'm never resposibly for any damage to your stuff! This version is also NOT completely tested.
 
    (c) Dylan Van Assche, producer of the Trainduino serie.
 */
