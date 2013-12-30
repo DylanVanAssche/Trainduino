@@ -23,7 +23,7 @@ boolean Status = true; // Starting always in DAY mode!
 TimedAction DayON          =     TimedAction(random(1000, 2000), DayONFunction); // Define every timer for this sketch.
 TimedAction DayOFF         =     TimedAction(random(2500, 350), DayOFFFunction);
 TimedAction Night          =     TimedAction(random(1000, 2000), NightFunction);
-TimedAction TimerDayNight  =     TimedAction(1000, TimerDayNightFunction);
+TimedAction TimerDayNight  =     TimedAction(60*1000, TimerDayNightFunction);
 
 int Hours = 0; // Saves the hours that are passed. 1 hour = 1 minute.
 
