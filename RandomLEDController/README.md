@@ -9,3 +9,9 @@ The RandomLEDController can control 14 LED's in houses and has also 1 output for
 --------------
 
 First prerelease version of the RandomLEDController (V0.9) is online! 
+
+
+04 - 01 - 2014
+--------------
+
+FULL release of the RandomLEDController (V1.0) is now available!
