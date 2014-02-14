@@ -14,5 +14,12 @@ The RandomLEDController can control 14 LED's in houses and has also 1 output for
 
 RGBLEDController
 ----------------
+
 Does the same as the RandomLEDController but this time it controls a RGB LEDstrip and a white LEDstrip to simulate a 
 completely day/night. It runs synchrone with the RandomLEDController because it use the same timer system.
+
+DCCSwitchController
+-------------------
+
+DCC accessory decoder with some extra nice functions. You can control 2 switches and 1 brake module.
+There's also 4 outputs for a signal. The 3 LED's on the board show the status of the incomming commands.
