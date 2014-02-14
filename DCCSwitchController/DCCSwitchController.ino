@@ -11,9 +11,9 @@
    *                                        *
    *--------> DCCSWITCHCONTROLLER <---------*
    *                                        *
-   *            V 0.7 PRERELEASE            *
+   *             V 1.0 RELEASE              *
    ******************************************
-   THIS IS A PRERELEASE! I'm never resposibly for any damage to your stuff! This version is NOT tested.
+   THIS IS A RELEASE! I'm never resposibly for any damage to your stuff! This version is completely tested.
 
    (c) Dylan Van Assche (2013 - 2014), producer of the Trainduino serie.
 
