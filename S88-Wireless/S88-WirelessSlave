@@ -1,0 +1,75 @@
+#include <wiring.h>
+#include <digitalWriteFast.h>  // Simple port manipulation library to speed up the sketch.
+#include <digital_write_macros.h>
+#include <SPI.h>  // Libraries for the RF24 radio
+#include "nRF24L01.h"
+#include "RF24.h"
+
+#define SLAVE_ADDRESS  1 // Address of this slave.
+
+/*
+   ******************************************
+   *               Trainduino               *
+   *                                        *
+   *-------------> S88-Wireless <-----------*
+   *                  SLAVE                 *
+   *                                        *
+   *              V 1.0 RELEASE             *
+   ******************************************
+   THIS IS A RELEASE! I'm never resposibly for any damage to your stuff! This version is tested on Arduino MEGA.
+
+   This sketch is part of the BASE sketch, here we will monitor the I/O pins and send them to the BASE.
+   It's also heavy documented, so you don't need a lot knowledge to understand it.
+   (c) Dylan Van Assche (2013 - 2014), producer of the Trainduino serie.   
+*/
+
+RF24 s88Radio(9,10);
+
+const byte SensorPin[9] = {14, 15, 16, 17, 18, 19, 20, 21}; // For Arduino MEGA only! For the UNO or another Arduino you have to change the sensor pins.
+const uint64_t pipes[2] = {0xF0F0F0F0E1LL, 0xF0F0F0F0D2LL};
+byte s88Data = B1000001;  // We will store the s88 data in this variable.
+byte address; // This will be the address that the base sends out, if it's the same as ours SLAVE_ADDRESS then we need to send back the s88 data.
+
+void setup()
+{
+  for(int i = 14; i < 22; i++)
+  {
+    pinModeFast(i, INPUT);
+    digitalWriteFast(i, HIGH);
+  }
+
+  pinModeFast(6, INPUT);
+  digitalWriteFast(6, HIGH);
+  pinModeFast(7, INPUT);
+  digitalWriteFast(7, HIGH);
+
+  s88Radio.begin();
+  s88Radio.setRetries(15,15);
+  s88Radio.setPayloadSize(8);
+  s88Radio.openWritingPipe(pipes[1]);
+  s88Radio.openReadingPipe(1,pipes[0]);
+  s88Radio.startListening();
+}
+
+void loop()
+{
+  s88Data = !digitalReadFast(SensorPin[0]) | (!digitalReadFast(SensorPin[1]) << 1) | (!digitalReadFast(SensorPin[2]) << 2) | (!digitalReadFast(SensorPin[3]) << 3) | (!digitalReadFast(SensorPin[4]) << 4) | (!digitalReadFast(SensorPin[5]) << 5) | (!digitalReadFast(SensorPin[6]) << 6) | (!digitalReadFast(SensorPin[7]) << 7);
+
+  if (s88Radio.available()) // Check for incoming data...
+  {
+    boolean transmissionComplete = false; // This boolean will delay the microcontroller until he received everything.
+    
+    while(!transmissionComplete)
+    {
+      transmissionComplete = s88Radio.read(&address, sizeof(byte)); // Receive the data.
+      delay(15);
+    }      
+
+    if(address == SLAVE_ADDRESS) // If this slave is polled, we have to send back the s88Data.
+    {
+      s88Radio.stopListening();
+      s88Radio.write(&s88Data, sizeof(byte));
+      s88Radio.startListening();
+    }
+  }
+}
