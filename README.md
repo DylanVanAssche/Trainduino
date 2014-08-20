@@ -22,4 +22,10 @@ DCCSwitchController
 -------------------
 
 DCC accessory decoder with some extra nice functions. You can control 2 switches and 1 brake module.
-There's also 4 outputs for a signal. The 3 LED's on the board show the status of the incomming commands.
+There are also 4 outputs for a signal. The 3 LED's on the board show the status of the incomming commands.
+
+S88Wireless
+-----------
+
+The S88Wireless system give you the possibilities to use your cheap S88 bus over a wireless connection. 
+It's perfectly for a railroad track that has to be flexible and portable since you don't need the 6pin ribbon cable all around your layout!
