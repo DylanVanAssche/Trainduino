@@ -14,6 +14,8 @@
 
    This sketch can simulate up to 32 S88 modules with each 16 feedback pins. That means that you can monitor 512 I/O pins :)
    It's also heavy documented, so you don't need a lot knowledge to understand it.
+   The only thing you have to add is a digitalReadFast() function to monitor the I/O pins or you can also take a look at the wireless based version of MEGA-S88.
+   
    (c) Dylan Van Assche (2013 - 2014), producer of the Trainduino serie.   
 */
 
