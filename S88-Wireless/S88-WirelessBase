@@ -25,7 +25,7 @@
 #define S88_LOAD     3  // LOAD line = HIGH? -> Master request the data NOW!
 #define S88_DATAOUT  4  // DATA line = This line will be used to write out the requested data in sync with the CLOCK pulses when the LOAD line is triggered.
 #define S88_RESET    5  // Not necessary since this RESET line only affects the 4044 chips but we want to simulate the 4014 chips.
-#define NUMBER_OF_S88MODULES  10  // The number of S88 units we want to simulate with the Arduino.
+#define NUMBER_OF_S88MODULES  1  // The number of S88 units we want to simulate with the Arduino.
 
 #define WIRELESS_LED A0  // This LED will go ON if we are doing stuff in the 'Wireless part' and goes OFF if we are done there.
 #define S88_LED A1  // This LED will go ON if we are doing stuff in the 'S88 part' and goes OFF if we are done there.
@@ -72,7 +72,7 @@ void loop()
   {
     digitalWriteFast(WIRELESS_LED, HIGH);
     address++;
-    if(address > 10)
+    if(address > NUMBER_OF_S88MODULES)
     {
       address = 1; 
     }    
