@@ -1,51 +1,77 @@
-#include <wiring.h>
-#include <digitalWriteFast.h>  // Simple port manipulation library to speed up the sketch.
-#include <digital_write_macros.h>
 #include <SPI.h>  // Libraries for the RF24 radio
 #include "nRF24L01.h"
 #include "RF24.h"
-
-#define SLAVE_ADDRESS  1 // Address of this slave.
+#include <digitalWriteFast.h>
 
 /*
-   ******************************************
-   *               Trainduino               *
-   *                                        *
-   *-------------> S88-Wireless <-----------*
-   *                  SLAVE                 *
-   *                                        *
-   *              V 1.0 RELEASE             *
-   ******************************************
-   THIS IS A RELEASE! I'm never resposibly for any damage to your stuff! This version is tested on Arduino MEGA.
+ ******************************************
+ *               Trainduino               *
+ *                                        *
+ *-------------> S88-Wireless <-----------*
+ *                  SLAVE                 *
+ *                                        *
+ *              V 1.2 RELEASE             *
+ ******************************************
+ THIS IS A RELEASE! I'm never resposibly for any damage to your stuff! This version is tested on Arduino Pro Micro.
+ >>> This sketch doesn't work on the PCB! This is for testing purpose only since it has a fixed address. <<<
+ 
+ This sketch is part of the base sketch, here we will monitor the I/O pins and send them to the base.
+ For more information, have a look at the base sketch please.
+ 
+ It's also heavy documented, so you don't need a lot knowledge to understand it.
+ (c) Dylan Van Assche (2013 - 2014), producer of the Trainduino serie.   
+ */
 
-   This sketch is part of the BASE sketch, here we will monitor the I/O pins and send them to the BASE.
-   It's also heavy documented, so you don't need a lot knowledge to understand it.
-   (c) Dylan Van Assche (2013 - 2014), producer of the Trainduino serie.   
-*/
+///////////////////
+///  CONSTANTS  ///
+///////////////////
 
-RF24 s88Radio(9,10);
+#define WIRELESS_LED 17  // ONBOARD LED on Arduino Pro Micro.
 
-const byte SensorPin[9] = {14, 15, 16, 17, 18, 19, 20, 21}; // For Arduino MEGA only! For the UNO or another Arduino you have to change the sensor pins.
-const uint64_t pipes[2] = {0xF0F0F0F0E1LL, 0xF0F0F0F0D2LL};
-byte s88Data = B1000001;  // We will store the s88 data in this variable.
+#define RADIO_CHANNEL 111  // The channel for the NRF24L01+ radio module. RANGE: 0 - 127
+#define SENSORTRIGGER 75  // This value determines the sensivity of the feedback sensors (High value = less noise). RANGE 0 - 255
+#define DIP_SWITCH_NONE 50  // DIP-switch 0-0
+#define DIP_SWITCH_FIRST 135  // DIP-switch 1-0
+#define DIP_SWITCH_SECOND 390  // DIP-switch 0-1
+#define DIP_SWITCH_BOTH 450  // DIP-switch 1-1
+
+const byte sensorPin[9] = {2, 3, 4, 5, 6, 7, 8, 9}; // The feedback pins...
+const byte dipSwitchPin[3] = {A1, A2, A3};  // Analog pins which read out the DIP-switch.
+const uint64_t pipes[2] = {0xF0F0F0F0E1LL, 0xF0F0F0F0D2LL};  // Pipes RF24
+
+/////////////////
+///  OBJECTS  ///
+/////////////////
+
+RF24 s88Radio(A0, 10);
+
+///////////////
+///  BYTES  ///
+///////////////
+
+byte sensorCounter[9];  // The individual counter for every sensor to avoid noise and bad wheelcontacts.
+byte sensorState[9];  // We store here the state of every sensor in.
+byte dipSwitchState[6];  // The state of every switch is stored here.
+byte s88Data;  // We will store the s88 data in this variable.
+byte slaveAddress;  // The slave address that will be read out at the setup from the DIP-switch configuration.
 byte address; // This will be the address that the base sends out, if it's the same as ours SLAVE_ADDRESS then we need to send back the s88 data.
 
 void setup()
 {
-  for(int i = 14; i < 22; i++)
+  slaveAddress = 2; 
+
+  for(int i = 0; i < 9; i++)
   {
-    pinModeFast(i, INPUT);
-    digitalWriteFast(i, HIGH);
+    pinModeFast(sensorPin[i], INPUT_PULLUP);
   }
 
-  pinModeFast(6, INPUT);
-  digitalWriteFast(6, HIGH);
-  pinModeFast(7, INPUT);
-  digitalWriteFast(7, HIGH);
+  pinModeFast(WIRELESS_LED, OUTPUT);
 
   s88Radio.begin();
-  s88Radio.setRetries(15,15);
-  s88Radio.setPayloadSize(8);
+  s88Radio.setRetries(10,10);
+  s88Radio.setDataRate(RF24_250KBPS);
+  s88Radio.setPayloadSize(2);
+  s88Radio.setChannel(RADIO_CHANNEL);
   s88Radio.openWritingPipe(pipes[1]);
   s88Radio.openReadingPipe(1,pipes[0]);
   s88Radio.startListening();
@@ -53,23 +79,58 @@ void setup()
 
 void loop()
 {
-  s88Data = !digitalReadFast(SensorPin[0]) | (!digitalReadFast(SensorPin[1]) << 1) | (!digitalReadFast(SensorPin[2]) << 2) | (!digitalReadFast(SensorPin[3]) << 3) | (!digitalReadFast(SensorPin[4]) << 4) | (!digitalReadFast(SensorPin[5]) << 5) | (!digitalReadFast(SensorPin[6]) << 6) | (!digitalReadFast(SensorPin[7]) << 7);
+  collectingS88Data();
 
-  if (s88Radio.available()) // Check for incoming data...
+  if(s88Radio.available()) // Check for incoming data...
   {
     boolean transmissionComplete = false; // This boolean will delay the microcontroller until he received everything.
-    
+    digitalWriteFast(WIRELESS_LED, HIGH);
+
     while(!transmissionComplete)
     {
       transmissionComplete = s88Radio.read(&address, sizeof(byte)); // Receive the data.
       delay(15);
     }      
 
-    if(address == SLAVE_ADDRESS) // If this slave is polled, we have to send back the s88Data.
+    if(address == slaveAddress) // If this slave is polled, we have to send back the s88Data.
     {
       s88Radio.stopListening();
       s88Radio.write(&s88Data, sizeof(byte));
       s88Radio.startListening();
     }
+    digitalWriteFast(WIRELESS_LED, LOW);
   }
+}
+
+void collectingS88Data()
+{    
+  for(int i = 0; i < 8; i++)
+  {
+    if(!digitalReadFast(sensorPin[i]))
+    {
+      if(sensorCounter[i] < 255)
+      {
+        sensorCounter[i]++; 
+      }
+    }
+    else
+    {
+      if(sensorCounter[i] > 0)
+      {
+        sensorCounter[i]--; 
+      }
+    }
+
+    if(sensorCounter[i] > SENSORTRIGGER)
+    {
+      sensorState[i] = 1;
+    }
+    else
+    {
+      sensorState[i] = 0;
+    }
+  } 
+
+  s88Data = sensorState[0] | (sensorState[1] << 1) | (sensorState[2] << 2) | (sensorState[3] << 3) | (sensorState[4] << 4) | (sensorState[5] << 5) | (sensorState[6] << 6) | (sensorState[7] << 7);
+
 }
