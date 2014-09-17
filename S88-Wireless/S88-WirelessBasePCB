@@ -1,0 +1,255 @@
+#include <digitalWriteFast.h>  // Port manipulation library...
+#include <SPI.h>  // RF24 libraries
+#include "nRF24L01.h"
+#include "RF24.h"
+
+/*
+ ******************************************
+ *               Trainduino               *
+ *                                        *
+ *-------------> S88-Wireless <-----------*
+ *                   BASE                 *
+ *                                        *
+ *              V 1.2 RELEASE             *
+ ******************************************
+ THIS IS A RELEASE! I'm never resposibly for any damage to your stuff! This version is tested on Arduino UNO.
+ 
+ The S88-Wireless brings the cheap s88 feedback system to the air! Now you don't have to concern anymore about flatcables and interference on the S88 bus.
+ 
+ The sketches are also heavy documented, so you don't need a lot knowledge to understand it.
+ 
+ >>> FEATURES:
+     ---------
+ 
+ * Emulates up to 31 S88 units with each a double byte of data on the S88 bus.
+ * Can poll up to 64 slaves with each 8 feedback pins. This feature isn't completely tested however, it should be possible.
+ * Uses NRF24L01+ transceiver who operate at a 2,4 Ghz frequency.
+ * Easy to change the channel and number of retries in the sketch. All the other settings of the NRF24L01+ are already optimized by myself.
+   You can find a noise-free channel by using the example 'scanner' from the Maniacbugs RF24 library.
+ * Number of s88 units is set by a 6 position DIP-switch that will be read out in the setup() function each time the S88-Wireless boots.
+ * Built-in CRC and ACK are activated by default.
+ * ERROR detection function which detect if the slave are alive. If one won't respond anymore, 
+   the ERROR LED turns ON and the S88-Wireless will toggle the command station emergency stop.
+ * Port manipulation delivered by the digitalWriteFast library.
+ * NRF24L01+ driver delivered by Maniacbugs RF24 library.
+ 
+ 
+ >>> IMPROVEMENTS:
+     -------------
+ 
+ [NEW]  The base checks if the slaves are alive. If there is one slave that doesn't respond, 
+        the base will activate the ERROR_LED and toggle the E_STOP on the command station.
+        You have to deactivate the emergency stop on the command station when the S88-Wireless operates again in his default mode.
+ 
+ [NEW]  The slaves will now take of bad wheelcontacts or noise on the feedback pins with a counter for each feedback pin.
+ 
+ [NEW]  The slaves adresses are now configurable with a 6 postions DIP-switch on each slave. 
+        You can set up to 63 slaves addresses in order to receive the maximum allowed s88 units (16 feedbackpins x 31 s88 units).
+        On the base you find also a 6 position DIP-switch to configure the number of S88 units that the base has to simulate and to poll.
+ 
+ [NEW]  DigitalWriteFast library added in the slave sketch for the Atmega32U4 boards (Arduino Leonardo, (Pro) Micro, Yun, Zero, ...).
+        This library will give the slave sketch a boost when it have to read the feedback pins out.
+ 
+ 
+ >>> IMPORTANT NOTES: 
+     ----------------   
+ * There are NO free pins anymore on the base and slave Arduino (Pro Micro, Uno, Zero, Leonardo, ...), 
+   if you want to extend S88-Wireless you can use SPI devices like shiftregisters, RFID-readers, ... or get an Arduino MEGA.                           
+ * The S88-Wireless has to be connected as last in the S88 bus if you use other S88 hardware since it doesn't 
+   take care of any other S88 hardware and their data!
+ * Feel free to modify these sketches but don't hijack them ;-)
+ 
+ (c) Dylan Van Assche (2013 - 2014), producer of the Trainduino serie.   
+ */
+
+///////////////////
+///  CONSTANTS  ///
+///////////////////
+
+#define S88_CLOCK    3  // CLOCK line = HIGH? -> Do something NOW!
+#define S88_LOAD     4  // LOAD line = HIGH? -> Master request the data NOW!
+#define S88_DATAOUT  2  // DATA line = This line will be used to write out the requested data in sync with the CLOCK pulses when the LOAD line is triggered.
+#define ERROR_LED A3  // The ERROR_LED will light up if we have an error.
+#define S88_LED A1  // This LED will go ON if we are doing stuff in the 'S88 part' and goes OFF if we are done there.
+#define WIRELESS_LED A2  // This LED will go ON if we are doing stuff in the 'Wireless part' and goes OFF if we are done there.
+#define E_STOP A0  // Pin that activates the E_STOP on the command station
+
+#define RETRIES 15  //  Defines how many times the RF24 may retry to receive valid data.
+#define RADIO_CHANNEL 111  // The channel we will use to communicate.
+
+const uint64_t pipes[2] = {0xF0F0F0F0E1LL, 0xF0F0F0F0D2LL}; // {Writingpipe, Listeningpipe}.
+const byte dipSwitchPin[6] = {5, 6, 7, 8, A4, A5};
+
+/////////////////
+///  OBJECTS  ///
+/////////////////
+
+RF24 s88Radio(9,10); // RF24 object.
+
+///////////////
+///  BYTES  ///
+///////////////
+
+uint16_t s88Data[32]; // The s88 16-bit data storage.
+
+byte s88[2 * 32]; // The S88 data that will be received from the slaves. 
+byte dataUpdateFailed[2 * 32];
+byte bitIndex = 0;
+byte s88DataIndex = 0;
+byte numberOfS88Units;
+byte address = 1; // The BASE has address 0 so we will not use that as a SLAVE_ADDRESS.
+
+//////////////////
+///  BOOLEANS  ///
+//////////////////
+
+volatile boolean LOADTrigger = false;
+boolean pollSuccesfully = false;
+boolean RF24TimeOutStatus = false;
+
+void setup()
+{
+  for(byte i = 0; i < 6; i++)
+  {
+    pinModeFast(dipSwitchPin[i], INPUT_PULLUP)
+  }    
+  numberOfS88Units = !digitalRead(dipSwitchPin[0]) | (!digitalRead(dipSwitchPin[1]) << 1) | (!digitalRead(dipSwitchPin[2]) << 2) | (!digitalRead(dipSwitchPin[3]) << 3) | (!digitalRead(dipSwitchPin[4]) << 4) | (!digitalRead(dipSwitchPin[5]) << 5) | 0 | 0;
+
+  attachInterrupt(1, CLOCK, RISING); // Activate CLOCK interrupt on EVERY rising pulse of the CLOCK line.
+
+  pinModeFast(S88_LOAD, INPUT); // pinModeFast -> pinMode for digitalWriteFast port manipulation library.
+  pinModeFast(S88_DATAOUT, OUTPUT);
+  pinModeFast(WIRELESS_LED, OUTPUT);
+  pinModeFast(S88_LED, OUTPUT);
+  pinModeFast(ERROR_LED, OUTPUT);
+  pinModeFast(E_STOP, OUTPUT);
+
+  s88Radio.begin(); // RF24 setup...
+  s88Radio.setRetries(RETRIES,RETRIES);
+  s88Radio.setDataRate(RF24_250KBPS);
+  s88Radio.setPayloadSize(2);
+  s88Radio.setChannel(RADIO_CHANNEL);
+  s88Radio.openWritingPipe(pipes[0]);
+  s88Radio.openReadingPipe(1,pipes[1]);
+  s88Radio.startListening();
+}
+
+void loop()
+{  
+  // Combines 2x 8bit shift registers into 1x 16bit shift register. 
+  for(byte dataManipulationIndex = 0;  dataManipulationIndex < numberOfS88Units; dataManipulationIndex++)
+  {
+    s88Data[dataManipulationIndex] = (s88[dataManipulationIndex * 2 + 1] << 8)  |  s88[dataManipulationIndex * 2];
+  }
+
+  // RF24 code
+  s88Radio.stopListening(); // Stop listening so we can talk.
+  digitalWriteFast(WIRELESS_LED, LOW); // Turn the WIRELESS_LED OFF since we didn't communicate with the slave yet.
+  pollSuccesfully = false;
+  boolean transmissionComplete = s88Radio.write(&address, sizeof(byte)); // Write out the SLAVE_ADDRESS to activate the slave.
+
+  if (transmissionComplete)
+  {
+    pollSuccesfully = true;  
+  }
+  else
+  {
+    pollSuccesfully = false;
+  }
+
+  s88Radio.startListening();
+
+  unsigned long timeOutTime = millis();
+  RF24TimeOutStatus = false;
+
+  while (!s88Radio.available() && !RF24TimeOutStatus)
+  {
+    if (millis() - timeOutTime > 200 )
+    {
+      RF24TimeOutStatus = true;
+    }
+  }
+
+  if(!RF24TimeOutStatus)  // DATA is valid so we may read it out...
+  {
+    s88Radio.read(&s88[address - 1], sizeof(byte));  // Data read.
+
+    if(pollSuccesfully) // Only skip to the next address if the poll was succesfully AND the data is valid.
+    {
+      address++; // Increase the address each time we have succesfully received the data until we reached the last slave.
+      if(address > numberOfS88Units)  // Reset the address variable after we polled the last slave
+      {
+        address = 1; 
+      }  
+
+      pollSuccesfully = false;  // Reset the pollSuccesfully boolean for the next poll
+      dataUpdateFailed[address - 1] = 0; // Transmission succesfully so we can reset the dataUpdateFailed counter for this slave and turn the ERROR_LED and the E_STOP OFF.
+      digitalWriteFast(WIRELESS_LED, HIGH); // Turn the WIRELESS_LED ON since we have received valid data from the right slave.
+      digitalWriteFast(ERROR_LED, LOW);
+      digitalWriteFast(E_STOP, LOW);
+    }
+  }
+
+  checkForErrors();
+
+  delay(20); // Increase stability
+}    
+
+void CLOCK() // If CLOCK rises, check the LOAD line to see if we have to do something!
+{
+  detachInterrupt(1); // Deactivate interrupt CLOCK.
+
+  if(digitalReadFast(S88_LOAD) || LOADTrigger != false) // The LOAD line has been triggered by the command station, he wants the data NOW! Let's give it to him.
+  {
+    LOADTrigger = true; // The LOAD line will not stay high until all the bits are written out, only a pulse occurs every cycle but this function must go on until all the bits are written out.
+    digitalWriteFast(S88_LED, HIGH);  // We turn the S88_LED ON until we written out all the data.
+
+    if(s88Data[s88DataIndex] & (1 << bitIndex)) // Write every bit out.
+    { 
+      digitalWriteFast(S88_DATAOUT, HIGH);
+    }
+    else
+    {
+      digitalWriteFast(S88_DATAOUT, LOW);
+    }
+
+    bitIndex++; // Next bit
+  }
+
+  if(bitIndex > 15) // 16 bits passed? Reset the bitIndex counter...
+  {
+    s88DataIndex++; // Next 16-bit shift register.
+    bitIndex = 0;
+
+    if(s88DataIndex > numberOfS88Units - 1) // Human counting to array counting conversion. We want to simulate 10 S88 modules, so we give the variable numberOfS88Units a value of 10. However, the array starts always with a 0.
+    {
+      s88DataIndex = 0; // Reset the s88DataIndex counter, this counter tracks the number of 16-bit shift register 4014.
+      LOADTrigger = false; // Everything is written out so we can stop writing data out.
+      digitalWriteFast(S88_LED, LOW); // Turn the S88_LED OFF when we are done for this cycle.
+    }
+  } 
+
+  attachInterrupt(1, CLOCK, RISING); // Activate interrupt CLOCK again.
+}
+
+void checkForErrors() // We want an ERROR free system however we need to check if their are any problems with the NRF24L01+
+{
+  if(!pollSuccesfully || RF24TimeOutStatus) // This function will check if the slaves and the base are doing their job.
+  {
+    dataUpdateFailed[address - 1]++; // Transmission fails? -> increase dataUpdateFailed counter for this slave.
+
+    if(dataUpdateFailed[address - 1] > RETRIES) // If the transmission fails RETRIES times we turn the ERROR_LED on
+    {
+      digitalWriteFast(ERROR_LED, HIGH); 
+    }
+
+    if(dataUpdateFailed[address - 1] > 3 * RETRIES) // If the transmission fails 3 * RETRIES times we toggle the Emergency STOP (DCC booster bus connector) on the command station and clear the s88 data.
+    {
+      for(int i = 0; i < numberOfS88Units; i++) // Set all the S88 data to 0 since we aren't sure of the data is valid!
+      {
+        s88[i] = 0;
+      }
+      digitalWriteFast(E_STOP, HIGH); 
+    }
+  } 
+}
