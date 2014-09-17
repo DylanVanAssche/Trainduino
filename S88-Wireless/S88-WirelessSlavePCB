@@ -1,0 +1,177 @@
+#include <SPI.h>  // Libraries for the RF24 radio
+#include "nRF24L01.h"
+#include "RF24.h"
+#include <digitalWriteFast.h>
+
+/*
+ ******************************************
+ *               Trainduino               *
+ *                                        *
+ *-------------> S88-Wireless <-----------*
+ *                  SLAVE                 *
+ *                                        *
+ *              V 1.2 RELEASE             *
+ ******************************************
+ THIS IS A RELEASE! I'm never resposibly for any damage to your stuff! This version is tested on Arduino MEGA.
+ 
+ This sketch is part of the base sketch, here we will monitor the I/O pins and send them to the base.
+ For more information, have a look at the base sketch please.
+ 
+ It's also heavy documented, so you don't need a lot knowledge to understand it.
+ (c) Dylan Van Assche (2013 - 2014), producer of the Trainduino serie.   
+ */
+
+///////////////////
+///  CONSTANTS  ///
+///////////////////
+
+#define WIRELESS_LED A4  // Wireless LED on PCB with Atmega 328.
+
+#define RADIO_CHANNEL 111  // The channel for the NRF24L01+ radio module. RANGE: 0 - 127
+#define SENSORTRIGGER 75  // This value determines the sensivity of the feedback sensors (High value = less noise). RANGE 0 - 255
+#define DIP_SWITCH_NONE 50  // DIP-switch 0-0
+#define DIP_SWITCH_FIRST 150  // DIP-switch 1-0
+#define DIP_SWITCH_SECOND 375  // DIP-switch 0-1
+#define DIP_SWITCH_BOTH 400  // DIP-switch 1-1
+
+const byte sensorPin[9] = {8, 7, 6, 5, 4, 3, 2, A0}; // The feedback pins...
+const byte dipSwitchPin[3] = {A3, A2, A1};  // Analog pins which read out the DIP-switch.
+const uint64_t pipes[2] = {0xF0F0F0F0E1LL, 0xF0F0F0F0D2LL};  // Pipes RF24
+
+/////////////////
+///  OBJECTS  ///
+/////////////////
+
+RF24 s88Radio(9,10);
+
+///////////////
+///  BYTES  ///
+///////////////
+
+byte sensorCounter[9];  // The individual counter for every sensor to avoid noise and bad wheelcontacts.
+byte sensorState[9];  // We store here the state of every sensor in.
+byte dipSwitchState[6];  // The state of every switch is stored here.
+byte s88Data;  // We will store the s88 data in this variable.
+byte slaveAddress;  // The slave address that will be read out at the setup from the DIP-switch configuration.
+byte address; // This will be the address that the base sends out, if it's the same as ours SLAVE_ADDRESS then we need to send back the s88 data.
+
+void setup()
+{
+  for(byte i = 0; i < 3; i++)
+  {
+    int dipSwitchValue = analogRead(dipSwitchPin[i]);  // Read the dipSwitchValue 3 times and take the average of these readings.
+    delay(15);
+    dipSwitchValue = dipSwitchValue + analogRead(dipSwitchPin[i]);
+    delay(15);
+    dipSwitchValue = dipSwitchValue + analogRead(dipSwitchPin[i]);
+    delay(15);
+    dipSwitchValue = dipSwitchValue / 3;
+
+    if(dipSwitchValue < DIP_SWITCH_NONE)  // Check if the DIP-switches are OFF and continue, if NOT determine which of the 2 DIP-switches are ON.
+    {
+      dipSwitchState[2 * i] = 0;
+      dipSwitchState[2 * i + 1] = 0; 
+    }
+    else
+    {  
+      if(dipSwitchValue < DIP_SWITCH_FIRST)
+      {
+        dipSwitchState[2 * i] = 0;
+        dipSwitchState[2 * i + 1] = 1; 
+      }
+      else
+      {
+        if(dipSwitchValue < DIP_SWITCH_SECOND)
+        {
+          dipSwitchState[2 * i] = 1;
+          dipSwitchState[2 * i + 1] = 0; 
+        }
+        else
+        {
+          if(dipSwitchValue < DIP_SWITCH_BOTH)
+          {
+            dipSwitchState[2 * i] = 1;
+            dipSwitchState[2 * i + 1] = 1; 
+          }
+        }
+      }
+    }
+  }
+
+  slaveAddress = dipSwitchState[0] | (dipSwitchState[1] << 1) | (dipSwitchState[2] << 2) | (dipSwitchState[3] << 3) | (dipSwitchState[4] << 4) | (dipSwitchState[5] << 5) | 0 | 0;
+
+  for(int i = 0; i < 9; i++)
+  {
+    pinModeFast(sensorPin[i], INPUT_PULLUP);
+  }
+
+  pinModeFast(WIRELESS_LED, OUTPUT);
+  digitalWriteFast(WIRELESS_LED, HIGH);
+
+  s88Radio.begin();
+  s88Radio.setRetries(10,10);
+  s88Radio.setDataRate(RF24_250KBPS);
+  s88Radio.setPayloadSize(2);
+  s88Radio.setChannel(RADIO_CHANNEL);
+  s88Radio.openWritingPipe(pipes[1]);
+  s88Radio.openReadingPipe(1,pipes[0]);
+  s88Radio.startListening();
+}
+
+void loop()
+{
+  collectingS88Data();
+
+  if(s88Radio.available()) // Check for incoming data...
+  {
+    boolean transmissionComplete = false; // This boolean will delay the microcontroller until he received everything.
+    digitalWriteFast(WIRELESS_LED, HIGH);
+
+    while(!transmissionComplete)
+    {
+      transmissionComplete = s88Radio.read(&address, sizeof(byte)); // Receive the data.
+      delay(15);
+    }      
+
+    if(address == slaveAddress) // If this slave is polled, we have to send back the s88Data.
+    {
+      s88Radio.stopListening();
+      s88Radio.write(&s88Data, sizeof(byte));
+      s88Radio.startListening();
+    }
+    digitalWriteFast(WIRELESS_LED, LOW);
+  }
+}
+
+void collectingS88Data()
+{    
+  for(int i = 0; i < 8; i++)
+  {
+    if(!digitalReadFast(sensorPin[i]))
+    {
+      if(sensorCounter[i] < 255)
+      {
+        sensorCounter[i]++; 
+      }
+    }
+    else
+    {
+      if(sensorCounter[i] > 0)
+      {
+        sensorCounter[i]--; 
+      }
+    }
+
+    if(sensorCounter[i] > SENSORTRIGGER)
+    {
+      sensorState[i] = 1;
+    }
+    else
+    {
+      sensorState[i] = 0;
+    }
+  } 
+
+  s88Data = sensorState[0] | (sensorState[1] << 1) | (sensorState[2] << 2) | (sensorState[3] << 3) | (sensorState[4] << 4) | (sensorState[5] << 5) | (sensorState[6] << 6) | (sensorState[7] << 7);
+
+}
