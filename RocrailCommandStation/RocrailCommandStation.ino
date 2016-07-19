@@ -148,6 +148,7 @@ void setup() {
   pinMode(ESTOPButton, INPUT_PULLUP);
   pinMode(buttonShift, INPUT_PULLUP);
   pinMode(communicationLED, OUTPUT);
+  pinMode(shiftStatusLED, OUTPUT);
   pinMode(ESTOP_LED, OUTPUT);
   pinMode(changeLocomotiveLED, OUTPUT);
   digitalWrite(ESTOP_LED, LOW);
